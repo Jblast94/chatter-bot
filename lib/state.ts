@@ -7,7 +7,8 @@ import { create } from 'zustand';
 import { Agent, Charlotte, Paul, Shane, Penny } from './presets/agents';
 
 /**
- * User
+ * User Identity State
+ * Tracks personalization data used to ground AI responses.
  */
 export type User = {
   name?: string;
@@ -27,19 +28,46 @@ export const useUser = create<
 }));
 
 /**
- * Assistant Message
+ * Chat Message History
+ * Used for both Gemini Cloud and Local OpenAI-compatible history.
  */
 export type ChatMessage = {
   role: 'user' | 'model';
   text: string;
   timestamp: Date;
   attachments?: { name: string; type: string; data: string }[];
-  // Fix: Support grounding metadata storage for model responses
   groundingChunks?: any[];
 };
 
 /**
- * Agents
+ * Hybrid Configuration State
+ * Allows switching between Google GenAI SDK and a local self-hosted API.
+ * 
+ * Local Engine Tips:
+ * - Ollama: Use http://localhost:11434/v1
+ * - vLLM: Use http://localhost:8000/v1
+ * - llama.cpp: Use http://localhost:8080/v1
+ */
+export type ModelProvider = 'gemini' | 'local';
+
+export const useConfig = create<{
+  provider: ModelProvider;
+  setProvider: (p: ModelProvider) => void;
+  localEndpoint: string;
+  setLocalEndpoint: (e: string) => void;
+  localModelId: string;
+  setLocalModelId: (id: string) => void;
+}>(set => ({
+  provider: 'gemini',
+  setProvider: provider => set({ provider }),
+  localEndpoint: 'http://localhost:11434/v1',
+  setLocalEndpoint: localEndpoint => set({ localEndpoint }),
+  localModelId: 'llama3',
+  setLocalModelId: localModelId => set({ localModelId }),
+}));
+
+/**
+ * Agent / Character Management
  */
 function getAgentById(id: string) {
   const { availablePersonal, availablePresets } = useAgent.getState();
@@ -86,7 +114,7 @@ export const useAgent = create<{
 }));
 
 /**
- * UI
+ * UI State
  */
 export const useUI = create<{
   showUserConfig: boolean;

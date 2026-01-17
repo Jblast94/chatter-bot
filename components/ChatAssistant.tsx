@@ -5,9 +5,15 @@
 */
 import React, { useState, useRef, useEffect } from 'react';
 import { GoogleGenAI, Type } from '@google/genai';
-import { useUI, useUser, ChatMessage } from '@/lib/state';
+import { useUI, useUser, useConfig, ChatMessage } from '@/lib/state';
 import c from 'classnames';
 
+/**
+ * ChatAssistant Component
+ * Bridges the gap between Google Gemini Cloud services and Local self-hosted models.
+ * Handles multimodal input (text/images) for Gemini and falls back to standard
+ * OpenAI-compatible completions for local providers like Ollama or vLLM.
+ */
 export default function ChatAssistant() {
   const { 
     showChatAssistant, 
@@ -18,6 +24,8 @@ export default function ChatAssistant() {
     setCodingMode 
   } = useUI();
   const { name } = useUser();
+  const { provider, localEndpoint, localModelId } = useConfig();
+  
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [attachments, setAttachments] = useState<{ name: string; type: string; data: string }[]>([]);
@@ -44,6 +52,10 @@ export default function ChatAssistant() {
     });
   };
 
+  /**
+   * Main Dispatcher for Messages
+   * Logic splits here based on whether 'gemini' or 'local' is selected in UserSettings.
+   */
   const sendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if ((!input.trim() && attachments.length === 0) || loading) return;
@@ -61,51 +73,71 @@ export default function ChatAssistant() {
     setLoading(true);
 
     try {
-      // Fix: Exclusively use process.env.API_KEY for SDK initialization
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
-      
-      // Build parts for the current message
-      const parts: any[] = [{ text: input }];
-      userMsg.attachments?.forEach(att => {
-        if (att.type.startsWith('image/')) {
-          parts.push({
-            inlineData: {
-              mimeType: att.type,
-              data: att.data
-            }
-          });
-        } else {
-          // For non-image files, we'll just mention them in text for now
-          parts[0].text += `\n[Attached File: ${att.name}]`;
-        }
-      });
-
       const systemInstruction = isCodingMode 
-        ? "You are an anonymous coding agent. You are elite, pithy, and focused on executing and debugging complex code. You provide complete, production-ready code blocks and simulated terminal output if 'execution' is requested. Your tone is professional but mysterious."
-        : `You are a helpful personal assistant named Gemini. You are helping ${name || 'the user'} with their tasks and documents.`;
+        ? "You are an anonymous coding agent. You are elite, pithy, and focused on executing and debugging complex code."
+        : `You are a helpful personal assistant helping ${name || 'the user'}.`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-pro-preview',
-        contents: [{ role: 'user', parts }],
-        config: {
-          systemInstruction,
-          tools: isCodingMode ? [{ googleSearch: {} }] : [],
-        }
-      });
+      if (provider === 'gemini') {
+        // --- GEMINI CLOUD LOGIC ---
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY as string });
+        const parts: any[] = [{ text: input }];
+        userMsg.attachments?.forEach(att => {
+          if (att.type.startsWith('image/')) {
+            parts.push({ inlineData: { mimeType: att.type, data: att.data } });
+          } else {
+            parts[0].text += `\n[Attached File: ${att.name}]`;
+          }
+        });
 
-      const modelMsg: ChatMessage = {
-        role: 'model',
-        text: response.text || 'I encountered an error processing your request.',
-        timestamp: new Date(),
-        // Fix: Correctly extract grounding chunks for search grounding as required
-        groundingChunks: response.candidates?.[0]?.groundingMetadata?.groundingChunks,
-      };
-      addChatMessage(modelMsg);
+        const response = await ai.models.generateContent({
+          model: 'gemini-3-pro-preview',
+          contents: [{ role: 'user', parts }],
+          config: { systemInstruction, tools: isCodingMode ? [{ googleSearch: {} }] : [] }
+        });
+
+        addChatMessage({
+          role: 'model',
+          text: response.text || 'Empty response',
+          timestamp: new Date(),
+          groundingChunks: response.candidates?.[0]?.groundingMetadata?.groundingChunks,
+        });
+      } else {
+        // --- LOCAL / SELF-HOSTED LOGIC ---
+        // Uses the standard OpenAI Chat Completion specification supported by:
+        // - Ollama (/v1/chat/completions)
+        // - vLLM (/v1/chat/completions)
+        // - llama.cpp (/v1/chat/completions)
+        const response = await fetch(`${localEndpoint.replace(/\/$/, '')}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: localModelId,
+            messages: [
+              { role: 'system', content: systemInstruction },
+              ...chatMessages.map(m => ({ 
+                role: m.role === 'user' ? 'user' : 'assistant', 
+                content: m.text 
+              })),
+              { role: 'user', content: input }
+            ],
+            temperature: 0.7,
+          })
+        });
+
+        const data = await response.json();
+        const text = data.choices?.[0]?.message?.content || 'Local engine error.';
+        
+        addChatMessage({
+          role: 'model',
+          text: text,
+          timestamp: new Date(),
+        });
+      }
     } catch (err) {
       console.error(err);
       addChatMessage({
         role: 'model',
-        text: 'Error: Failed to connect to Gemini Pro. Please check your network or API key.',
+        text: `Network Error: Verify that your ${provider === 'local' ? 'local server is running and CORS is enabled' : 'API Key is valid'}.`,
         timestamp: new Date(),
       });
     } finally {
@@ -121,7 +153,10 @@ export default function ChatAssistant() {
         <div className="chat-header">
           <div className="header-title">
             <span className="icon">{isCodingMode ? 'terminal' : 'assistant'}</span>
-            <h3>{isCodingMode ? 'Coding Agent' : 'Personal Assistant'}</h3>
+            <div className="title-stack">
+              <h3>{isCodingMode ? 'Coding Agent' : 'Personal Assistant'}</h3>
+              <span className="provider-badge">{provider === 'gemini' ? 'Gemini 3 Pro' : `Local: ${localModelId}`}</span>
+            </div>
           </div>
           <div className="header-actions">
             <button 
@@ -140,62 +175,25 @@ export default function ChatAssistant() {
         <div className="chat-messages" ref={scrollRef}>
           {chatMessages.length === 0 && (
             <div className="empty-state">
-              <span className="icon">spark</span>
-              <p>How can I assist you today?</p>
-              {isCodingMode && <p className="sub">Coding Agent Active. Ready to build.</p>}
+              <span className="icon">{provider === 'gemini' ? 'spark' : 'dns'}</span>
+              <p>Ready to assist via {provider === 'gemini' ? 'Gemini Cloud' : `Local Server (${localModelId})`}</p>
             </div>
           )}
           {chatMessages.map((msg, i) => (
             <div key={i} className={c("message-row", msg.role)}>
               <div className="message-bubble">
-                {msg.attachments && msg.attachments.length > 0 && (
-                  <div className="message-attachments">
-                    {msg.attachments.map((att, ai) => (
-                      <div key={ai} className="attachment-preview">
-                        {att.type.startsWith('image/') ? (
-                          <img src={`data:${att.type};base64,${att.data}`} alt={att.name} />
-                        ) : (
-                          <div className="file-icon">
-                            <span className="icon">description</span>
-                            <span>{att.name}</span>
-                          </div>
-                        )}
-                      </div>
-                    ))}
+                {msg.attachments && msg.attachments.map((att, ai) => (
+                  <div key={ai} className="attachment-preview">
+                    {att.type.startsWith('image/') ? <img src={`data:${att.type};base64,${att.data}`} alt={att.name} /> : <div className="file-icon"><span className="icon">description</span>{att.name}</div>}
                   </div>
-                )}
+                ))}
                 <div className="message-text">
-                  {msg.text.split('\n').map((line, li) => (
-                    <p key={li}>{line}</p>
-                  ))}
+                  {msg.text.split('\n').map((line, li) => <p key={li}>{line}</p>)}
                 </div>
-                {/* Fix: Render grounding sources to comply with search grounding visibility rules */}
-                {msg.groundingChunks && (
-                  <div className="grounding-sources">
-                    <p className="sources-label">Sources:</p>
-                    <ul className="sources-list">
-                      {msg.groundingChunks.map((chunk: any, ci: number) => (
-                        chunk.web && (
-                          <li key={ci}>
-                            <a href={chunk.web.uri} target="_blank" rel="noopener noreferrer">
-                              {chunk.web.title || chunk.web.uri}
-                            </a>
-                          </li>
-                        )
-                      ))}
-                    </ul>
-                  </div>
-                )}
               </div>
             </div>
           ))}
-          {loading && (
-            <div className="message-row model">
-              <div className="message-bubble loading">
-                <div className="dot-typing"></div>
-              </div>
-            </div>
-          )}
+          {loading && <div className="message-row model"><div className="message-bubble loading"><div className="dot-typing"></div></div></div>}
         </div>
 
         <form className="chat-input-area" onSubmit={sendMessage}>
@@ -204,38 +202,21 @@ export default function ChatAssistant() {
               {attachments.map((att, i) => (
                 <div key={i} className="attachment-chip">
                   <span>{att.name}</span>
-                  <button type="button" onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))}>
-                    <span className="icon">close</span>
-                  </button>
+                  <button type="button" onClick={() => setAttachments(prev => prev.filter((_, idx) => idx !== i))}><span className="icon">close</span></button>
                 </div>
               ))}
             </div>
           )}
           <div className="input-row">
-            <button type="button" className="icon-btn" onClick={() => fileInputRef.current?.click()}>
-              <span className="icon">attach_file</span>
-            </button>
-            <input 
-              type="file" 
-              multiple 
-              hidden 
-              ref={fileInputRef} 
-              onChange={handleFileUpload}
-            />
+            <button type="button" className="icon-btn" onClick={() => fileInputRef.current?.click()}><span className="icon">attach_file</span></button>
+            <input type="file" multiple hidden ref={fileInputRef} onChange={handleFileUpload} />
             <textarea 
-              placeholder={isCodingMode ? "Ask the Coding Agent..." : "Message Assistant..."}
+              placeholder={provider === 'gemini' ? "Ask Gemini Cloud..." : `Ask Local ${localModelId}...`}
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  sendMessage();
-                }
-              }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
             />
-            <button type="submit" className="send-btn" disabled={loading}>
-              <span className="icon">send</span>
-            </button>
+            <button type="submit" className="send-btn" disabled={loading}><span className="icon">send</span></button>
           </div>
         </form>
       </div>

@@ -24,7 +24,7 @@ import AudioRecordingWorklet from './worklets/audio-processing';
 import VolMeterWorket from './worklets/vol-meter';
 
 import { createWorketFromSrc } from './audioworklet-registry';
-// Fix: Use named export for EventEmitter to ensure prototype methods like 'emit' are correctly recognized by the compiler
+// Fix: Use named export and interface merging for EventEmitter to ensure prototype methods like 'emit' are correctly recognized by the compiler
 import { EventEmitter } from 'eventemitter3';
 
 function arrayBufferToBase64(buffer: ArrayBuffer) {
@@ -37,6 +37,8 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
   return window.btoa(binary);
 }
 
+// Fix: interface declaration merging to expose EventEmitter methods on the AudioRecorder class
+export interface AudioRecorder extends EventEmitter {}
 export class AudioRecorder extends EventEmitter {
   stream: MediaStream | undefined;
   audioContext: AudioContext | undefined;

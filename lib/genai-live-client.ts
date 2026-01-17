@@ -15,7 +15,7 @@ import {
   Part,
   Session,
 } from '@google/genai';
-// Fix: Use named export for EventEmitter to resolve type errors where methods like 'on', 'off', and 'emit' were reported missing
+// Fix: Use named export and interface merging for EventEmitter to resolve type errors where methods like 'on', 'off', and 'emit' were reported missing
 import { EventEmitter } from 'eventemitter3';
 import { DEFAULT_LIVE_API_MODEL } from './constants';
 import { difference } from 'lodash';
@@ -69,6 +69,8 @@ export interface LiveClientEventTypes {
   turncomplete: () => void;
 }
 
+// Fix: interface declaration merging to expose EventEmitter methods on the GenAILiveClient class
+export interface GenAILiveClient extends EventEmitter<LiveClientEventTypes> {}
 export class GenAILiveClient extends EventEmitter<LiveClientEventTypes> {
   public readonly model: string = DEFAULT_LIVE_API_MODEL;
 

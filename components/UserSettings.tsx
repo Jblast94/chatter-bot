@@ -1,34 +1,32 @@
+
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
 */
 import Modal from './Modal';
-import { useUI, useUser } from '@/lib/state';
+import { useUI, useUser, useConfig } from '@/lib/state';
 
 export default function UserSettings() {
   const { name, info, setName, setInfo } = useUser();
   const { setShowUserConfig } = useUI();
-
-  function updateClient() {
-    setShowUserConfig(false);
-  }
+  const { provider, setProvider, localEndpoint, setLocalEndpoint, localModelId, setLocalModelId } = useConfig();
 
   return (
     <Modal onClose={() => setShowUserConfig(false)}>
       <div className="userSettings">
         <p>
-          This is a simple tool that allows you to design, test, and banter with
-          custom AI characters on the fly.
+          Configure your hybrid identity and local model connections.
         </p>
 
         <form
           onSubmit={e => {
             e.preventDefault();
             setShowUserConfig(false);
-            updateClient();
           }}
         >
-          <p>Adding this optional info makes the experience more fun:</p>
+          <div className="section-header">
+            <h3>Identity</h3>
+          </div>
 
           <div>
             <p>Your name</p>
@@ -37,22 +35,69 @@ export default function UserSettings() {
               name="name"
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder="What do you like to be called?"
+              placeholder="How should the AI address you?"
             />
           </div>
 
           <div>
-            <p>Your info</p>
+            <p>Contextual Info (Memory)</p>
             <textarea
-              rows={3}
+              rows={2}
               name="info"
               value={info}
               onChange={e => setInfo(e.target.value)}
-              placeholder="Things we should know about you… Likes, dislikes, hobbies, interests, favorite movies, books, tv shows, foods, etc."
+              placeholder="Shared memories or preferences for better character retention..."
             />
           </div>
 
-          <button className="button primary">Let’s go!</button>
+          <hr />
+
+          <div className="section-header">
+            <h3>Model Engine</h3>
+            <p className="subtext">Switch between Cloud (Gemini) and Local (Ollama/vLLM).</p>
+          </div>
+
+          <div>
+            <p>Provider Engine</p>
+            <select 
+              value={provider} 
+              onChange={(e) => setProvider(e.target.value as any)}
+              className="provider-select"
+            >
+              <option value="gemini">Google Gemini Pro (Cloud)</option>
+              <option value="local">Self-Hosted / Local API</option>
+            </select>
+          </div>
+
+          {provider === 'local' && (
+            <div className="local-config-fields">
+              <div className="info-box">
+                <span className="icon">info</span>
+                <p>Ensure your local server (Ollama, vLLM, or llama.cpp) is running with OpenAI-compatible headers.</p>
+              </div>
+              <div>
+                <p>Base URL</p>
+                <input 
+                  type="text" 
+                  value={localEndpoint} 
+                  onChange={(e) => setLocalEndpoint(e.target.value)}
+                  placeholder="e.g., http://localhost:11434/v1"
+                />
+                <small>Default ports: Ollama (11434), vLLM (8000), llama.cpp (8080)</small>
+              </div>
+              <div>
+                <p>Model Identifier</p>
+                <input 
+                  type="text" 
+                  value={localModelId} 
+                  onChange={(e) => setLocalModelId(e.target.value)}
+                  placeholder="e.g., phi3, gemma, or llama3"
+                />
+              </div>
+            </div>
+          )}
+
+          <button className="button primary">Save & Apply</button>
         </form>
       </div>
     </Modal>
